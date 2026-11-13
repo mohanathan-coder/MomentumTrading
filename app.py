@@ -5,7 +5,7 @@ Nifty 500 Momentum Stock Screener & Capital Allocator
 A clean, straightforward momentum screener.
 Calculates risk-adjusted multi-timeframe momentum (3M, 6M, 9M)
 and outputs whole-share portfolio allocations for manual Google Sheet tracking.
-Allows selecting any specific As-of Closing Price Date.
+Allows selecting any specific As-of Closing Price Date with valid lookback range.
 """
 
 import os
@@ -37,25 +37,6 @@ n_hold = st.sidebar.slider("Number of Stocks to Hold", min_value=5, max_value=30
 exit_rank = st.sidebar.slider("Exit Buffer Rank Threshold", min_value=20, max_value=100, value=40,
                               help="Use this rank threshold to check your Google Sheet: if your stock is still <= this rank, keep it; otherwise sell.")
 
-# Date Input Section
-st.sidebar.markdown("---")
-st.sidebar.subheader("📅 Closing Price Date (As of Date)")
-use_custom_date = st.sidebar.checkbox("Input Specific Closing Date", value=False, help="Check this to pick any historical date (e.g. 10/11/2026)")
-
-today = datetime.date.today()
-if use_custom_date:
-    selected_date = st.sidebar.date_input(
-        "Select Closing Date",
-        value=today,
-        min_value=datetime.date(2020, 1, 1),
-        max_value=today,
-        format="DD/MM/YYYY",
-        help="Screener will evaluate 3M/6M/9M momentum as of this exact closing date."
-    )
-else:
-    selected_date = None
-
-st.sidebar.markdown("---")
 refresh_data = st.sidebar.button("🔄 Force Refresh Market Data from NSE")
 
 # Fast Cached Data Loader
@@ -72,13 +53,35 @@ if refresh_data:
 with st.spinner("Loading market data & calculating momentum ranks..."):
     close_df, volume_df, name_mapping = load_raw_data(force_refresh=refresh_data)
 
+# Available dates with at least 252 days of prior history for momentum calculation
+min_valid_dt = pd.to_datetime(close_df.index[min(252, len(close_df) - 1)]).date()
+max_valid_dt = pd.to_datetime(close_df.index[-1]).date()
+
+# Date Input Section in Sidebar
+st.sidebar.markdown("---")
+st.sidebar.subheader("📅 Closing Price Date (As of Date)")
+use_custom_date = st.sidebar.checkbox("Input Specific Closing Date", value=False, help="Check this to pick any historical date")
+
+if use_custom_date:
+    selected_date = st.sidebar.date_input(
+        "Select Closing Date",
+        value=max_valid_dt,
+        min_value=min_valid_dt,
+        max_value=max_valid_dt,
+        format="DD/MM/YYYY",
+        help=f"Available dates with full 9-month lookback: {min_valid_dt.strftime('%d/%m/%Y')} to {max_valid_dt.strftime('%d/%m/%Y')}"
+    )
+    st.sidebar.caption(f"🗓️ *Available range: {min_valid_dt.strftime('%d/%m/%Y')} to {max_valid_dt.strftime('%d/%m/%Y')}*")
+else:
+    selected_date = None
+
 # Slice data to target date if requested
 if selected_date:
     target_dt = pd.to_datetime(selected_date)
     sliced_close = close_df.loc[:target_dt]
     sliced_volume = volume_df.loc[:target_dt]
     if sliced_close.empty or len(sliced_close) < 200:
-        st.error(f"Insufficient historical data before {selected_date.strftime('%d/%m/%Y')}. Please choose a date after 2020.")
+        st.error(f"⚠️ Need at least 252 trading days of market data before {selected_date.strftime('%d/%m/%Y')} to calculate 9-month momentum. Please choose a date between {min_valid_dt.strftime('%d/%m/%Y')} and {max_valid_dt.strftime('%d/%m/%Y')}.")
         st.stop()
 else:
     sliced_close = close_df

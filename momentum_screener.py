@@ -70,7 +70,8 @@ def load_or_fetch_prices(tickers, refresh=False):
     batch_size = 50
     opens, closes, vols = [], [], []
 
-    start_date = (datetime.datetime.today() - datetime.timedelta(days=450)).strftime("%Y-%m-%d")
+    # Download at least 3-4 years so any selected historical date has sufficient lookback
+    start_date = (datetime.datetime.today() - datetime.timedelta(days=1200)).strftime("%Y-%m-%d")
     for i in range(0, len(tickers), batch_size):
         chunk = tickers[i : i + batch_size]
         print(f"    Downloading {i + 1} to {min(i + batch_size, len(tickers))}...")
