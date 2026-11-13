@@ -1,0 +1,6 @@
+Strategy,Final (Rs),CAGR %,Max DD %,Sharpe,Trades,Costs (Rs),Tax (Rs)
+exit>20 post-tax,913245,38.3,-37.2,1.42,1354.0,112753.0,89273.0
+exit>20 pre-tax,1002517,40.2,-31.6,1.57,,,
+exit>40 post-tax,956668,39.2,-33.5,1.45,854.0,76727.0,99776.0
+exit>40 pre-tax,1056444,41.2,-33.5,1.6,,,
+Nifty 500 buy & hold,235294,13.4,-38.3,0.81,,,
