@@ -143,6 +143,7 @@ def compute_momentum_ranks(close_df, volume_df, lookbacks=(63, 126, 189), vol_wi
     composite_score[~valid] = np.nan
 
     latest_prices = close_np[e]
+    latest_date_str = pd.to_datetime(close_df.index[e]).strftime("%d-%b-%Y")
     results = []
     for idx, col in enumerate(cols):
         if not valid[idx] or np.isnan(composite_score[idx]):
@@ -151,6 +152,7 @@ def compute_momentum_ranks(close_df, volume_df, lookbacks=(63, 126, 189), vol_wi
             "ticker": col,
             "symbol": col.replace(".NS", ""),
             "cmp": round(latest_prices[idx], 2),
+            "cmp_date": latest_date_str,
             "ret_3m_%": round(return_dict[63][idx] * 100, 1),
             "ret_6m_%": round(return_dict[126][idx] * 100, 1),
             "ret_9m_%": round(return_dict[189][idx] * 100, 1),
@@ -183,6 +185,8 @@ def generate_rebalance_orders(rank_df, name_mapping, capital=100000, n_hold=20, 
     
     rank_lookup = dict(zip(rank_df["symbol"], rank_df["rank"]))
     cmp_lookup = dict(zip(rank_df["symbol"], rank_df["cmp"]))
+    date_lookup = dict(zip(rank_df["symbol"], rank_df["cmp_date"])) if "cmp_date" in rank_df.columns else {}
+    latest_date_str = rank_df["cmp_date"].iloc[0] if "cmp_date" in rank_df.columns and not rank_df.empty else datetime.datetime.today().strftime("%d-%b-%Y")
 
     decisions = []
     held_to_keep = []
@@ -193,6 +197,7 @@ def generate_rebalance_orders(rank_df, name_mapping, capital=100000, n_hold=20, 
         avg_px = float(row["avg_price"])
         curr_px = cmp_lookup.get(sym, avg_px)
         curr_rank = rank_lookup.get(sym, 9999)
+        curr_date = date_lookup.get(sym, latest_date_str)
         curr_val = round(sh * curr_px, 2)
         pnl = round(curr_val - (sh * avg_px), 2)
         pnl_pct = round((pnl / (sh * avg_px)) * 100, 2) if (sh * avg_px) > 0 else 0.0
@@ -204,6 +209,7 @@ def generate_rebalance_orders(rank_df, name_mapping, capital=100000, n_hold=20, 
                 "company": name_mapping.get(sym, sym),
                 "rank": curr_rank,
                 "cmp": curr_px,
+                "cmp_date": curr_date,
                 "shares": sh,
                 "est_value": curr_val,
                 "pnl": pnl,
@@ -218,6 +224,7 @@ def generate_rebalance_orders(rank_df, name_mapping, capital=100000, n_hold=20, 
                 "company": name_mapping.get(sym, sym),
                 "rank": curr_rank,
                 "cmp": curr_px,
+                "cmp_date": curr_date,
                 "shares": sh,
                 "est_value": curr_val,
                 "pnl": pnl,
@@ -263,6 +270,7 @@ def generate_rebalance_orders(rank_df, name_mapping, capital=100000, n_hold=20, 
             "company": name_mapping.get(sym, sym),
             "rank": row["rank"],
             "cmp": cmp_val,
+            "cmp_date": row.get("cmp_date", latest_date_str),
             "shares": shares_to_buy,
             "est_value": est_invest,
             "pnl": 0.0,
@@ -316,7 +324,7 @@ def main():
     orders_df.to_csv(order_file, index=False)
     print(f"\n[✓] Generated Rebalance Orders Sheet: {order_file}\n")
 
-    display_cols = ["action", "symbol", "company", "rank", "cmp", "shares", "est_value", "reason"]
+    display_cols = ["action", "symbol", "company", "rank", "cmp", "cmp_date", "shares", "est_value", "reason"]
     print(orders_df[display_cols].to_string(index=False))
 
     if args.commit:

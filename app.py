@@ -33,7 +33,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("📈 Nifty 500 Momentum Trading Dashboard")
-st.caption("Quantitative Multi-Timeframe Momentum (3M, 6M, 9M) with Monthly Rebalancing")
+st.caption("Quantitative Multi-Timeframe Momentum (3M, 6M, 9M) Screener & Portfolio Manager")
 
 # Sidebar Configuration
 st.sidebar.header("⚙️ Strategy Settings")
@@ -41,7 +41,39 @@ capital = st.sidebar.number_input("Total Capital (₹)", min_value=10000, max_va
 n_hold = st.sidebar.slider("Number of Stocks to Hold", min_value=5, max_value=30, value=20)
 exit_rank = st.sidebar.slider("Exit Buffer Rank", min_value=20, max_value=50, value=40, 
                               help="Hold current stocks if rank is within this threshold to avoid excessive churn.")
-rebalance_day = st.sidebar.number_input("Monthly Rebalance Day", min_value=1, max_value=28, value=21)
+
+# Rebalance Frequency
+st.sidebar.markdown("---")
+st.sidebar.subheader("🗓️ Rebalance Frequency")
+rebalance_freq = st.sidebar.selectbox(
+    "Choose Frequency:",
+    ["Monthly (Recommended)", "Weekly", "Daily"]
+)
+
+today = datetime.date.today()
+if rebalance_freq.startswith("Monthly"):
+    rebalance_day = st.sidebar.number_input("Monthly Rebalance Day (e.g. 21st)", min_value=1, max_value=28, value=21)
+    if today.day < rebalance_day:
+        next_rebalance_date = datetime.date(today.year, today.month, rebalance_day)
+    else:
+        next_m = today.month + 1 if today.month < 12 else 1
+        next_y = today.year if today.month < 12 else today.year + 1
+        next_rebalance_date = datetime.date(next_y, next_m, rebalance_day)
+    rebalance_label = f"Monthly (Day {rebalance_day}) • Next Due: {next_rebalance_date.strftime('%d-%b-%Y')}"
+
+elif rebalance_freq.startswith("Weekly"):
+    weekly_day = st.sidebar.selectbox("Weekly Execution Day", ["Friday Market Close", "Monday Market Open"])
+    target_weekday = 4 if "Friday" in weekly_day else 0
+    days_ahead = (target_weekday - today.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7
+    next_weekly_date = today + datetime.timedelta(days=days_ahead)
+    rebalance_label = f"Weekly ({weekly_day}) • Next Due: {next_weekly_date.strftime('%d-%b-%Y')}"
+
+else: # Daily
+    st.sidebar.warning("⚠️ **Note on Daily Rebalance:** Checking and trading daily with ₹1 Lakh incurs high flat DP charges (~₹16/sale) and short-term taxes. Monthly rebalance is quantitatively superior.")
+    next_trading_day = today + datetime.timedelta(days=1 if today.weekday() < 4 else (7 - today.weekday()))
+    rebalance_label = f"Daily • Next Due: {next_trading_day.strftime('%d-%b-%Y')}"
 
 st.sidebar.markdown("---")
 refresh_data = st.sidebar.button("🔄 Force Refresh Market Data from NSE")
@@ -61,20 +93,30 @@ if refresh_data:
 with st.spinner("Loading market data & momentum ranks..."):
     rank_df, name_mapping = get_market_data(force_refresh=refresh_data)
 
+# Determine the exact date of CMP
+cmp_date_str = rank_df["cmp_date"].iloc[0] if ("cmp_date" in rank_df.columns and not rank_df.empty) else today.strftime("%d-%b-%Y")
+
+# Prominent Info Banner
+b_col1, b_col2 = st.columns([1, 1])
+with b_col1:
+    st.info(f"📅 **Current Market Price (CMP) Date:** **`{cmp_date_str}`** *(NSE Closing)*")
+with b_col2:
+    st.info(f"⏰ **Rebalance Schedule:** **`{rebalance_label}`**")
+
 tab1, tab2, tab3 = st.tabs(["🚀 Rebalance Screener", "📊 Active Portfolio", "🧪 Backtest Report"])
 
 # --------------------------------------------------------------------------- #
 # TAB 1: Live Screener (Re-calculates dynamically on Capital change)
 # --------------------------------------------------------------------------- #
 with tab1:
-    st.subheader("Monthly Orders & Capital Allocation")
+    st.subheader(f"Orders & Capital Allocation ({rebalance_freq.split()[0]} Frequency)")
     
     col_mode1, col_mode2 = st.columns([3, 2])
     with col_mode1:
         mode = st.radio(
             "Select Screener Mode:",
             ["Initial / Fresh Allocation (Scale to entered Capital)", 
-             "Monthly Rebalance (Compare against Active Portfolio)"],
+             "Rebalance Check (Compare against Active Portfolio)"],
             horizontal=True
         )
 
@@ -98,13 +140,14 @@ with tab1:
                 "company": name_mapping.get(sym, sym),
                 "rank": row["rank"],
                 "cmp": cmp_val,
+                "cmp_date": row.get("cmp_date", cmp_date_str),
                 "shares": shares,
                 "est_value": round(shares * cmp_val, 2),
                 "reason": f"Rank #{row['rank']} (Score: {row['score']:.2f})"
             })
         df_orders = pd.DataFrame(allocations)
 
-    # 2. Monthly Rebalance Mode
+    # 2. Rebalance Mode
     else:
         df_orders, _ = ms.generate_rebalance_orders(
             rank_df,
@@ -128,7 +171,7 @@ with tab1:
         m3.metric("New BUYs", buys, help="New entrants from Top 20")
         m4.metric("Capital Deployed", f"₹{deployed:,.2f}", delta=f"Free Cash: ₹{cash_left:,.2f}")
 
-        st.markdown("### Actionable Order Sheet")
+        st.markdown(f"### Actionable Order Sheet *(Prices as of {cmp_date_str})*")
         
         def style_action(val):
             if val == "BUY":
@@ -139,7 +182,8 @@ with tab1:
                 return "background-color: #fff3cd; color: #664d03; font-weight: bold;"
             return ""
 
-        display_df = df_orders[["action", "symbol", "company", "rank", "cmp", "shares", "est_value", "reason"]]
+        display_cols = ["action", "symbol", "company", "rank", "cmp", "cmp_date", "shares", "est_value", "reason"]
+        display_df = df_orders[display_cols]
         st.dataframe(
             display_df.style.map(style_action, subset=["action"]),
             use_container_width=True,
@@ -158,7 +202,8 @@ with tab1:
                             "ticker": f"{r['symbol']}.NS",
                             "shares": r["shares"],
                             "avg_price": r["cmp"],
-                            "invested": r["est_value"]
+                            "invested": r["est_value"],
+                            "bought_date": cmp_date_str
                         })
                 ms.save_current_portfolio(pd.DataFrame(new_portfolio))
                 st.success("✅ Portfolio saved! Check Tab 2 to view your active holdings.")
@@ -166,9 +211,9 @@ with tab1:
         with btn_c2:
             csv_data = display_df.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="📥 Download Order Sheet (CSV)",
+                label=f"📥 Download Order Sheet (as of {cmp_date_str})",
                 data=csv_data,
-                file_name=f"momentum_orders_{datetime.datetime.today().strftime('%Y-%m-%d')}.csv",
+                file_name=f"momentum_orders_{cmp_date_str}.csv",
                 mime="text/csv"
             )
 
@@ -215,7 +260,7 @@ with tab3:
         
     st.markdown("""
     > **Key Backtest Findings:**
-    > - **Strict Exit (Exit > 20):** 38.3% CAGR, 1,354 trades, ₹1,12,753 paid in fees & DP charges.
-    > - **Buffer Exit (Exit > 40):** **39.2% CAGR**, 854 trades, **₹76,727 paid in fees** (Saved ₹36,000+ in friction).
+    > - **Monthly Rebalance with Rank 40 Buffer:** **39.2% CAGR**, 854 trades, **saved ₹36,000+** in DP fees compared to strict exit.
+    > - **Why Weekly or Daily has higher friction:** Delivery sales in Indian markets incur flat DP charges (~₹16/sale). Daily or weekly churn increases transaction drag. Monthly rebalancing provides optimal trend capture with minimal fees.
     > - **Nifty 500 Index:** 13.4% CAGR, -38.3% Drawdown.
     """)
