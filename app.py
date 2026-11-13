@@ -5,6 +5,7 @@ Nifty 500 Momentum Stock Screener & Capital Allocator
 A clean, straightforward momentum screener.
 Calculates risk-adjusted multi-timeframe momentum (3M, 6M, 9M)
 and outputs whole-share portfolio allocations for manual Google Sheet tracking.
+Allows selecting any specific As-of Closing Price Date.
 """
 
 import os
@@ -36,31 +37,65 @@ n_hold = st.sidebar.slider("Number of Stocks to Hold", min_value=5, max_value=30
 exit_rank = st.sidebar.slider("Exit Buffer Rank Threshold", min_value=20, max_value=100, value=40,
                               help="Use this rank threshold to check your Google Sheet: if your stock is still <= this rank, keep it; otherwise sell.")
 
+# Date Input Section
+st.sidebar.markdown("---")
+st.sidebar.subheader("📅 Closing Price Date (As of Date)")
+use_custom_date = st.sidebar.checkbox("Input Specific Closing Date", value=False, help="Check this to pick any historical date (e.g. 10/11/2026)")
+
+today = datetime.date.today()
+if use_custom_date:
+    selected_date = st.sidebar.date_input(
+        "Select Closing Date",
+        value=today,
+        min_value=datetime.date(2020, 1, 1),
+        max_value=today,
+        format="DD/MM/YYYY",
+        help="Screener will evaluate 3M/6M/9M momentum as of this exact closing date."
+    )
+else:
+    selected_date = None
+
 st.sidebar.markdown("---")
 refresh_data = st.sidebar.button("🔄 Force Refresh Market Data from NSE")
 
 # Fast Cached Data Loader
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_market_data(force_refresh=False):
+def load_raw_data(force_refresh=False):
     tickers, name_mapping = ms.load_universe(ms.DEFAULT_UNIVERSE)
     close_df, volume_df = ms.load_or_fetch_prices(tickers, refresh=force_refresh)
-    rank_df = ms.compute_momentum_ranks(close_df, volume_df)
-    return rank_df, name_mapping
+    return close_df, volume_df, name_mapping
 
 if refresh_data:
     st.cache_data.clear()
     st.sidebar.success("Market data refreshed from NSE!")
 
 with st.spinner("Loading market data & calculating momentum ranks..."):
-    rank_df, name_mapping = get_market_data(force_refresh=refresh_data)
+    close_df, volume_df, name_mapping = load_raw_data(force_refresh=refresh_data)
 
-today = datetime.date.today()
-cmp_date_str = rank_df["cmp_date"].iloc[0] if ("cmp_date" in rank_df.columns and not rank_df.empty) else today.strftime("%d-%b-%Y")
+# Slice data to target date if requested
+if selected_date:
+    target_dt = pd.to_datetime(selected_date)
+    sliced_close = close_df.loc[:target_dt]
+    sliced_volume = volume_df.loc[:target_dt]
+    if sliced_close.empty or len(sliced_close) < 200:
+        st.error(f"Insufficient historical data before {selected_date.strftime('%d/%m/%Y')}. Please choose a date after 2020.")
+        st.stop()
+else:
+    sliced_close = close_df
+    sliced_volume = volume_df
+
+rank_df = ms.compute_momentum_ranks(sliced_close, sliced_volume)
+
+actual_trading_dt = pd.to_datetime(sliced_close.index[-1]).date()
+cmp_date_str = actual_trading_dt.strftime("%d-%b-%Y")
 
 # Info Banner
 b1, b2 = st.columns([1, 1])
 with b1:
-    st.info(f"📅 **Price Data As Of:** **`{cmp_date_str}`** *(NSE Closing)*")
+    if selected_date and selected_date != actual_trading_dt:
+        st.info(f"📅 **Price As Of:** **`{cmp_date_str}`** *(Note: {selected_date.strftime('%d/%m/%Y')} was a weekend/holiday, used prior trading close)*")
+    else:
+        st.info(f"📅 **Price Data As Of:** **`{cmp_date_str}`** *(NSE Closing)*")
 with b2:
     slot_budget = capital / n_hold
     st.info(f"💰 **Budget Per Stock:** **`₹{slot_budget:,.2f}`** *(₹{capital:,.0f} ÷ {n_hold} stocks)*")
@@ -121,7 +156,7 @@ with tab1:
         m3.metric("Total Invested", f"₹{total_invested:,.2f}")
         m4.metric("Unallocated Cash", f"₹{cash_left:,.2f}")
 
-        st.markdown(f"### Top {n_hold} Momentum Stocks *(Ready for Google Sheets)*")
+        st.markdown(f"### Top {n_hold} Momentum Stocks *(As of {cmp_date_str})*")
         
         st.dataframe(
             df_portfolio.style.format({
@@ -141,7 +176,7 @@ with tab1:
 
         csv_portfolio = df_portfolio.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label=f"📥 Download Top {n_hold} CSV (Import into Google Sheets)",
+            label=f"📥 Download Top {n_hold} CSV (as of {cmp_date_str})",
             data=csv_portfolio,
             file_name=f"momentum_top_{n_hold}_{cmp_date_str}.csv",
             mime="text/csv",
@@ -154,7 +189,7 @@ with tab1:
 # TAB 2: Buffer Watchlist (Top 40 / Search any stock)
 # --------------------------------------------------------------------------- #
 with tab2:
-    st.subheader(f"Buffer Watchlist (Ranks 1 to {exit_rank})")
+    st.subheader(f"Buffer Watchlist (Ranks 1 to {exit_rank} as of {cmp_date_str})")
     st.markdown(f"""
     **How to use with your Google Sheet:**
     1. Check your existing stocks in your Google Sheet.
@@ -163,7 +198,6 @@ with tab2:
     4. If it has fallen **above Rank {exit_rank}** (or is missing), exit the stock (**SELL**) and pick a replacement from Tab 1.
     """)
 
-    # Filter ranks <= exit_rank
     buffer_df = rank_df[rank_df["rank"] <= exit_rank].copy()
     buffer_display = []
     for _, r in buffer_df.iterrows():
@@ -183,7 +217,6 @@ with tab2:
 
     df_buffer = pd.DataFrame(buffer_display)
     
-    # Search box
     search_sym = st.text_input("🔍 Quick Search Symbol in Universe (e.g. INFY, TATAMOTORS, CUPID):").strip().upper()
     if search_sym:
         match = rank_df[rank_df["symbol"] == search_sym]
@@ -191,9 +224,9 @@ with tab2:
             m_rank = int(match.iloc[0]["rank"])
             m_cmp = match.iloc[0]["cmp"]
             if m_rank <= exit_rank:
-                st.success(f"**{search_sym}** is currently **Rank #{m_rank}** (CMP: ₹{m_cmp:,.2f}). Result: **KEEP / HOLD** (Rank <= {exit_rank})")
+                st.success(f"**{search_sym}** was **Rank #{m_rank}** on {cmp_date_str} (CMP: ₹{m_cmp:,.2f}). Result: **KEEP / HOLD** (Rank <= {exit_rank})")
             else:
-                st.error(f"**{search_sym}** is currently **Rank #{m_rank}** (CMP: ₹{m_cmp:,.2f}). Result: **EXIT / SELL** (Rank fell below {exit_rank})")
+                st.error(f"**{search_sym}** was **Rank #{m_rank}** on {cmp_date_str} (CMP: ₹{m_cmp:,.2f}). Result: **EXIT / SELL** (Rank fell below {exit_rank})")
         else:
             st.warning(f"Symbol '{search_sym}' not found in Nifty 500.")
 
