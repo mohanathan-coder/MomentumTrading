@@ -2,7 +2,7 @@
 """
 Streamlit Web Dashboard for Nifty 500 Momentum Strategy
 ========================================================
-Online interactive web app for tracking and executing the Nifty 500
+Interactive web app for tracking and executing the Nifty 500
 Multi-Timeframe Momentum Strategy.
 """
 
@@ -26,12 +26,6 @@ st.set_page_config(
 # Custom Styling
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #f8f9fa;
-        border-radius: 8px;
-        padding: 15px;
-        border: 1px solid #dee2e6;
-    }
     .buy-tag { color: #198754; font-weight: bold; }
     .sell-tag { color: #dc3545; font-weight: bold; }
     .hold-tag { color: #ffc107; font-weight: bold; }
@@ -43,88 +37,90 @@ st.caption("Quantitative Multi-Timeframe Momentum (3M, 6M, 9M) with Monthly Reba
 
 # Sidebar Configuration
 st.sidebar.header("⚙️ Strategy Settings")
-capital = st.sidebar.number_input("Total Capital (₹)", min_value=10000, max_value=10000000, value=100000, step=10000)
+capital = st.sidebar.number_input("Total Capital (₹)", min_value=10000, max_value=50000000, value=100000, step=10000)
 n_hold = st.sidebar.slider("Number of Stocks to Hold", min_value=5, max_value=30, value=20)
 exit_rank = st.sidebar.slider("Exit Buffer Rank", min_value=20, max_value=50, value=40, 
                               help="Hold current stocks if rank is within this threshold to avoid excessive churn.")
 rebalance_day = st.sidebar.number_input("Monthly Rebalance Day", min_value=1, max_value=28, value=21)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("""
-**How It Works:**
-1. Ranks all Nifty 500 stocks by 3M, 6M, and 9M risk-adjusted momentum.
-2. Every month on the **21st**, tap **Run Live Screener**.
-3. Stocks in Top 40 are kept (**HOLD**).
-4. Stocks falling below Rank 40 are exited (**SELL**).
-5. New top entrants fill the vacant slots (**BUY**).
-""")
+refresh_data = st.sidebar.button("🔄 Force Refresh Market Data from NSE")
 
-tab1, tab2, tab3 = st.tabs(["🚀 Monthly Rebalance Screener", "📊 Active Portfolio", "🧪 Backtest Report"])
+# Fast Cached Data Loader
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_market_data(force_refresh=False):
+    tickers, name_mapping = ms.load_universe(ms.DEFAULT_UNIVERSE)
+    close_df, volume_df = ms.load_or_fetch_prices(tickers, refresh=force_refresh)
+    rank_df = ms.compute_momentum_ranks(close_df, volume_df)
+    return rank_df, name_mapping
+
+if refresh_data:
+    st.cache_data.clear()
+    st.sidebar.success("Market data cache refreshed!")
+
+with st.spinner("Loading market data & momentum ranks..."):
+    rank_df, name_mapping = get_market_data(force_refresh=refresh_data)
+
+tab1, tab2, tab3 = st.tabs(["🚀 Rebalance Screener", "📊 Active Portfolio", "🧪 Backtest Report"])
 
 # --------------------------------------------------------------------------- #
-# TAB 1: Live Screener
+# TAB 1: Live Screener (Re-calculates dynamically on Capital change)
 # --------------------------------------------------------------------------- #
 with tab1:
-    st.subheader("Generate Monthly Rebalance Orders")
+    st.subheader("Monthly Orders & Capital Allocation")
     
-    col_btn1, col_btn2 = st.columns([2, 5])
-    with col_btn1:
-        run_screener = st.button("🔄 Calculate Latest Signals", type="primary", use_container_width=True)
-    with col_btn2:
-        commit_portfolio = st.checkbox("Automatically update active portfolio with these orders", value=True)
+    col_mode1, col_mode2 = st.columns([3, 2])
+    with col_mode1:
+        mode = st.radio(
+            "Select Screener Mode:",
+            ["Initial / Fresh Allocation (Scale to entered Capital)", 
+             "Monthly Rebalance (Compare against Active Portfolio)"],
+            horizontal=True
+        )
 
-    if run_screener:
-        with st.spinner("Fetching latest NSE market data and computing momentum scores..."):
-            try:
-                tickers, name_mapping = ms.load_universe(ms.DEFAULT_UNIVERSE)
-                close_df, volume_df = ms.load_or_fetch_prices(tickers, refresh=False)
-                rank_df = ms.compute_momentum_ranks(close_df, volume_df)
-                
-                orders_df, _ = ms.generate_rebalance_orders(
-                    rank_df,
-                    name_mapping,
-                    capital=capital,
-                    n_hold=n_hold,
-                    exit_rank=exit_rank
-                )
-                
-                today_str = datetime.datetime.today().strftime("%Y-%m-%d")
-                order_file = os.path.join(BASE_DIR, f"rebalance_orders_{today_str}.csv")
-                orders_df.to_csv(order_file, index=False)
-                
-                if commit_portfolio:
-                    new_portfolio = []
-                    for _, r in orders_df.iterrows():
-                        if r["action"] in ["HOLD", "BUY"]:
-                            new_portfolio.append({
-                                "symbol": r["symbol"],
-                                "company": r["company"],
-                                "ticker": f"{r['symbol']}.NS",
-                                "shares": r["shares"],
-                                "avg_price": r["cmp"],
-                                "invested": r["est_value"]
-                            })
-                    ms.save_current_portfolio(pd.DataFrame(new_portfolio))
-                
-                st.session_state["latest_orders"] = orders_df
-                st.success("✅ Momentum signals computed successfully!")
-            except Exception as e:
-                st.error(f"Error computing signals: {e}")
+    # 1. Fresh Allocation Mode
+    if mode.startswith("Initial"):
+        slot_budget = capital / n_hold
+        allocations = []
+        for _, row in rank_df.iterrows():
+            if len(allocations) >= n_hold:
+                break
+            sym = row["symbol"]
+            cmp_val = row["cmp"]
+            if cmp_val > slot_budget:
+                continue
+            shares = int(slot_budget // cmp_val)
+            if shares < 1:
+                continue
+            allocations.append({
+                "action": "BUY",
+                "symbol": sym,
+                "company": name_mapping.get(sym, sym),
+                "rank": row["rank"],
+                "cmp": cmp_val,
+                "shares": shares,
+                "est_value": round(shares * cmp_val, 2),
+                "reason": f"Rank #{row['rank']} (Score: {row['score']:.2f})"
+            })
+        df_orders = pd.DataFrame(allocations)
 
-    # Load from session or disk
-    df_orders = st.session_state.get("latest_orders", None)
-    if df_orders is None:
-        order_files = [f for f in os.listdir(BASE_DIR) if f.startswith("rebalance_orders_") and f.endswith(".csv")]
-        if order_files:
-            latest_path = os.path.join(BASE_DIR, sorted(order_files)[-1])
-            df_orders = pd.read_csv(latest_path)
+    # 2. Monthly Rebalance Mode
+    else:
+        df_orders, _ = ms.generate_rebalance_orders(
+            rank_df,
+            name_mapping,
+            capital=capital,
+            n_hold=n_hold,
+            exit_rank=exit_rank
+        )
 
-    if df_orders is not None and not df_orders.empty:
+    # Display Metrics
+    if not df_orders.empty:
         holds = (df_orders["action"] == "HOLD").sum()
         sells = (df_orders["action"] == "SELL").sum()
         buys = (df_orders["action"] == "BUY").sum()
         deployed = df_orders[df_orders["action"].isin(["HOLD", "BUY"])]["est_value"].sum()
-        cash_left = capital - deployed
+        cash_left = max(0.0, capital - deployed)
 
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Keep / HOLD", holds, help="Stocks remaining in Top 40")
@@ -150,17 +146,31 @@ with tab1:
             hide_index=True
         )
 
-        csv_data = display_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Download Order Sheet (CSV)",
-            data=csv_data,
-            file_name=f"momentum_orders_{datetime.datetime.today().strftime('%Y-%m-%d')}.csv",
-            mime="text/csv",
-            type="secondary"
-        )
-    else:
-        st.info("Tap **'Calculate Latest Signals'** above to generate your first order sheet.")
-
+        btn_c1, btn_c2 = st.columns([2, 5])
+        with btn_c1:
+            if st.button("💾 Save as Active Portfolio", type="primary"):
+                new_portfolio = []
+                for _, r in df_orders.iterrows():
+                    if r["action"] in ["HOLD", "BUY"]:
+                        new_portfolio.append({
+                            "symbol": r["symbol"],
+                            "company": r["company"],
+                            "ticker": f"{r['symbol']}.NS",
+                            "shares": r["shares"],
+                            "avg_price": r["cmp"],
+                            "invested": r["est_value"]
+                        })
+                ms.save_current_portfolio(pd.DataFrame(new_portfolio))
+                st.success("✅ Portfolio saved! Check Tab 2 to view your active holdings.")
+        
+        with btn_c2:
+            csv_data = display_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Download Order Sheet (CSV)",
+                data=csv_data,
+                file_name=f"momentum_orders_{datetime.datetime.today().strftime('%Y-%m-%d')}.csv",
+                mime="text/csv"
+            )
 
 # --------------------------------------------------------------------------- #
 # TAB 2: Active Portfolio Tracker
@@ -184,10 +194,9 @@ with tab2:
                 os.remove(port_path)
                 st.rerun()
         else:
-            st.info("Portfolio is empty. Run the screener to populate your starting 20 stocks.")
+            st.info("Portfolio is empty. Save a new portfolio from Tab 1.")
     else:
-        st.info("No active portfolio found. Run the screener in Tab 1 to initialize your holdings.")
-
+        st.info("No active portfolio found. Save a new portfolio from Tab 1.")
 
 # --------------------------------------------------------------------------- #
 # TAB 3: Backtest Performance
