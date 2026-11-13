@@ -54,8 +54,8 @@ st.sidebar.markdown("""
 **How It Works:**
 1. Ranks all Nifty 500 stocks by 3M, 6M, and 9M risk-adjusted momentum.
 2. Every month on the **21st**, tap **Run Live Screener**.
-3. Stocks in Top 35 are kept (**HOLD**).
-4. Stocks falling below Rank 35 are exited (**SELL**).
+3. Stocks in Top 20 are kept (**HOLD**).
+4. Stocks falling below Rank 40 are exited (**SELL**).
 5. New top entrants fill the vacant slots (**BUY**).
 """)
 
