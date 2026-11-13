@@ -45,7 +45,7 @@ st.caption("Quantitative Multi-Timeframe Momentum (3M, 6M, 9M) with Monthly Reba
 st.sidebar.header("⚙️ Strategy Settings")
 capital = st.sidebar.number_input("Total Capital (₹)", min_value=10000, max_value=10000000, value=100000, step=10000)
 n_hold = st.sidebar.slider("Number of Stocks to Hold", min_value=5, max_value=30, value=20)
-exit_rank = st.sidebar.slider("Exit Buffer Rank", min_value=20, max_value=50, value=35, 
+exit_rank = st.sidebar.slider("Exit Buffer Rank", min_value=20, max_value=50, value=40, 
                               help="Hold current stocks if rank is within this threshold to avoid excessive churn.")
 rebalance_day = st.sidebar.number_input("Monthly Rebalance Day", min_value=1, max_value=28, value=21)
 
@@ -54,7 +54,7 @@ st.sidebar.markdown("""
 **How It Works:**
 1. Ranks all Nifty 500 stocks by 3M, 6M, and 9M risk-adjusted momentum.
 2. Every month on the **21st**, tap **Run Live Screener**.
-3. Stocks in Top 20 are kept (**HOLD**).
+3. Stocks in Top 40 are kept (**HOLD**).
 4. Stocks falling below Rank 40 are exited (**SELL**).
 5. New top entrants fill the vacant slots (**BUY**).
 """)
@@ -127,14 +127,13 @@ with tab1:
         cash_left = capital - deployed
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Keep / HOLD", holds, help="Stocks remaining in Top 35")
-        m2.metric("Exit / SELL", sells, help="Stocks falling below Rank 35")
+        m1.metric("Keep / HOLD", holds, help="Stocks remaining in Top 40")
+        m2.metric("Exit / SELL", sells, help="Stocks falling below Rank 40")
         m3.metric("New BUYs", buys, help="New entrants from Top 20")
         m4.metric("Capital Deployed", f"₹{deployed:,.2f}", delta=f"Free Cash: ₹{cash_left:,.2f}")
 
         st.markdown("### Actionable Order Sheet")
         
-        # Color coding helper
         def style_action(val):
             if val == "BUY":
                 return "background-color: #d1e7dd; color: #0f5132; font-weight: bold;"

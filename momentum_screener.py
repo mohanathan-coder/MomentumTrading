@@ -10,7 +10,7 @@ Features:
 - Momentum Formula: Composite risk-adjusted momentum (3M, 6M, 9M returns normalized by volatility)
 - Caching: Uses `cache/prices.pkl` if available for instant execution (< 1 sec)
 - Rebalance Rules:
-    - Retain existing holdings if rank <= exit_rank (buffer rule, default: 35)
+    - Retain existing holdings if rank <= exit_rank (buffer rule, default: 40)
     - Fill available slots from Top 20 new entrants
     - Exact whole-share quantity and budget allocation per stock
 - Tracks existing portfolio via `current_portfolio.csv`
@@ -175,7 +175,7 @@ def save_current_portfolio(df):
     print(f"[✓] Saved updated portfolio to {PORTFOLIO_FILE}")
 
 
-def generate_rebalance_orders(rank_df, name_mapping, capital=100000, n_hold=20, exit_rank=35):
+def generate_rebalance_orders(rank_df, name_mapping, capital=100000, n_hold=20, exit_rank=40):
     """
     Evaluates current holdings against new ranks and allocates capital.
     """
@@ -279,7 +279,7 @@ def main():
     parser.add_argument("--universe", default=DEFAULT_UNIVERSE, help="Path to Nifty 500 CSV")
     parser.add_argument("--capital", type=float, default=100000, help="Total portfolio capital (Rs)")
     parser.add_argument("--n-hold", type=int, default=20, help="Number of stocks to hold (default 20)")
-    parser.add_argument("--exit-rank", type=int, default=35, help="Exit buffer rank threshold (default 35)")
+    parser.add_argument("--exit-rank", type=int, default=40, help="Exit buffer rank threshold (default 40)")
     parser.add_argument("--init", action="store_true", help="Initialize portfolio with fresh top 20")
     parser.add_argument("--commit", action="store_true", help="Save the resulting portfolio to current_portfolio.csv")
     parser.add_argument("--refresh", action="store_true", help="Force fresh download from Yahoo Finance")
