@@ -93,7 +93,6 @@ if refresh_data:
 with st.spinner("Loading market data & momentum ranks..."):
     rank_df, name_mapping = get_market_data(force_refresh=refresh_data)
 
-# Determine the exact date of CMP
 cmp_date_str = rank_df["cmp_date"].iloc[0] if ("cmp_date" in rank_df.columns and not rank_df.empty) else today.strftime("%d-%b-%Y")
 
 # Prominent Info Banner
@@ -124,12 +123,14 @@ with tab1:
     if mode.startswith("Initial"):
         slot_budget = capital / n_hold
         allocations = []
+        skipped_stocks = []
         for _, row in rank_df.iterrows():
             if len(allocations) >= n_hold:
                 break
             sym = row["symbol"]
             cmp_val = row["cmp"]
             if cmp_val > slot_budget:
+                skipped_stocks.append(f"{sym} (₹{cmp_val:,.2f})")
                 continue
             shares = int(slot_budget // cmp_val)
             if shares < 1:
@@ -139,13 +140,15 @@ with tab1:
                 "symbol": sym,
                 "company": name_mapping.get(sym, sym),
                 "rank": row["rank"],
-                "cmp": cmp_val,
+                "cmp": round(cmp_val, 2),
                 "cmp_date": row.get("cmp_date", cmp_date_str),
                 "shares": shares,
                 "est_value": round(shares * cmp_val, 2),
                 "reason": f"Rank #{row['rank']} (Score: {row['score']:.2f})"
             })
         df_orders = pd.DataFrame(allocations)
+        if skipped_stocks:
+            st.caption(f"💡 *Note: High-priced stocks skipped because their 1 share price exceeds slot budget of ₹{slot_budget:,.2f}:* " + ", ".join(skipped_stocks[:3]))
 
     # 2. Rebalance Mode
     else:
@@ -156,9 +159,15 @@ with tab1:
             n_hold=n_hold,
             exit_rank=exit_rank
         )
+        if not df_orders.empty:
+            df_orders["cmp"] = df_orders["cmp"].round(2)
+            df_orders["est_value"] = df_orders["est_value"].round(2)
 
     # Display Metrics
     if not df_orders.empty:
+        # Add S.No (Item Number 1 to N) so users don't confuse Rank with Item Count
+        df_orders.insert(0, "S.No", range(1, len(df_orders) + 1))
+
         holds = (df_orders["action"] == "HOLD").sum()
         sells = (df_orders["action"] == "SELL").sum()
         buys = (df_orders["action"] == "BUY").sum()
@@ -171,7 +180,7 @@ with tab1:
         m3.metric("New BUYs", buys, help="New entrants from Top 20")
         m4.metric("Capital Deployed", f"₹{deployed:,.2f}", delta=f"Free Cash: ₹{cash_left:,.2f}")
 
-        st.markdown(f"### Actionable Order Sheet *(Prices as of {cmp_date_str})*")
+        st.markdown(f"### Actionable Order Sheet — Exactly **{len(df_orders)} Stocks** *(Prices as of {cmp_date_str})*")
         
         def style_action(val):
             if val == "BUY":
@@ -182,10 +191,13 @@ with tab1:
                 return "background-color: #fff3cd; color: #664d03; font-weight: bold;"
             return ""
 
-        display_cols = ["action", "symbol", "company", "rank", "cmp", "cmp_date", "shares", "est_value", "reason"]
+        display_cols = ["S.No", "action", "symbol", "company", "rank", "cmp", "cmp_date", "shares", "est_value", "reason"]
         display_df = df_orders[display_cols]
         st.dataframe(
-            display_df.style.map(style_action, subset=["action"]),
+            display_df.style.map(style_action, subset=["action"]).format({
+                "cmp": "₹{:.2f}",
+                "est_value": "₹{:.2f}"
+            }),
             use_container_width=True,
             hide_index=True
         )
