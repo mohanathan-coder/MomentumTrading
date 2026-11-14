@@ -32,8 +32,8 @@ st.caption("Quantitative Multi-Timeframe Momentum Screener • NSE Nifty 500")
 # Sidebar Inputs
 # --------------------------------------------------------------------------- #
 st.sidebar.header("⚙️ Screener Settings")
-capital = st.sidebar.number_input("Total Capital (₹)", min_value=10000, max_value=50000000, value=100000, step=10000)
-n_hold = st.sidebar.slider("Number of Stocks to Hold", min_value=5, max_value=30, value=20)
+capital = st.sidebar.number_input("Total Capital (₹)", min_value=10000, max_value=50000000, value=50000, step=10000)
+n_hold = st.sidebar.slider("Number of Stocks to Hold", min_value=5, max_value=30, value=10)
 exit_rank = st.sidebar.slider("Exit Buffer Rank Threshold", min_value=20, max_value=100, value=40,
                               help="Use this rank threshold to check your Google Sheet: if your stock is still <= this rank, keep it; otherwise sell.")
 
