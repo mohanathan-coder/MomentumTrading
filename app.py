@@ -3,9 +3,9 @@
 Nifty 500 Momentum Stock Screener & Capital Allocator
 =====================================================
 A clean, straightforward momentum screener.
-Calculates risk-adjusted multi-timeframe momentum (3M, 6M, 9M)
+Calculates risk-adjusted multi-timeframe momentum (3M, 6M, 9M or custom selection)
 and outputs whole-share portfolio allocations for manual Google Sheet tracking.
-Allows selecting any specific As-of Closing Price Date with valid lookback range.
+Allows selecting any specific As-of Closing Price Date and lookback combination.
 """
 
 import os
@@ -26,7 +26,7 @@ st.set_page_config(
 )
 
 st.title("📈 Nifty 500 Momentum Stock Screener")
-st.caption("Quantitative Multi-Timeframe Momentum (3M, 6M, 9M) • NSE Nifty 500")
+st.caption("Quantitative Multi-Timeframe Momentum Screener • NSE Nifty 500")
 
 # --------------------------------------------------------------------------- #
 # Sidebar Inputs
@@ -36,6 +36,41 @@ capital = st.sidebar.number_input("Total Capital (₹)", min_value=10000, max_va
 n_hold = st.sidebar.slider("Number of Stocks to Hold", min_value=5, max_value=30, value=20)
 exit_rank = st.sidebar.slider("Exit Buffer Rank Threshold", min_value=20, max_value=100, value=40,
                               help="Use this rank threshold to check your Google Sheet: if your stock is still <= this rank, keep it; otherwise sell.")
+
+# Lookback Selection Section
+st.sidebar.markdown("---")
+st.sidebar.subheader("⏳ Momentum Lookbacks (3M, 6M, 9M)")
+st.sidebar.caption("Check which timeframes to use in ranking:")
+col_lb1, col_lb2, col_lb3 = st.sidebar.columns(3)
+with col_lb1:
+    use_3m = st.checkbox("3M", value=True, help="3-Month return (63 trading days)")
+with col_lb2:
+    use_6m = st.checkbox("6M", value=True, help="6-Month return (126 trading days)")
+with col_lb3:
+    use_9m = st.checkbox("9M", value=True, help="9-Month return (189 trading days)")
+
+selected_lbs = []
+lb_labels = []
+if use_3m:
+    selected_lbs.append(63)
+    lb_labels.append("3M")
+if use_6m:
+    selected_lbs.append(126)
+    lb_labels.append("6M")
+if use_9m:
+    selected_lbs.append(189)
+    lb_labels.append("9M")
+
+if not selected_lbs:
+    st.sidebar.error("⚠️ Please check at least one lookback window (3M, 6M, or 9M)!")
+    st.stop()
+
+lookback_tag = " + ".join(lb_labels)
+
+# Date Input Section in Sidebar
+st.sidebar.markdown("---")
+st.sidebar.subheader("📅 Closing Price Date (As of Date)")
+use_custom_date = st.sidebar.checkbox("Input Specific Closing Date", value=False, help="Check this to pick any historical date")
 
 refresh_data = st.sidebar.button("🔄 Force Refresh Market Data from NSE")
 
@@ -57,11 +92,6 @@ with st.spinner("Loading market data & calculating momentum ranks..."):
 min_valid_dt = pd.to_datetime(close_df.index[min(252, len(close_df) - 1)]).date()
 max_valid_dt = pd.to_datetime(close_df.index[-1]).date()
 
-# Date Input Section in Sidebar
-st.sidebar.markdown("---")
-st.sidebar.subheader("📅 Closing Price Date (As of Date)")
-use_custom_date = st.sidebar.checkbox("Input Specific Closing Date", value=False, help="Check this to pick any historical date")
-
 if use_custom_date:
     selected_date = st.sidebar.date_input(
         "Select Closing Date",
@@ -69,7 +99,7 @@ if use_custom_date:
         min_value=min_valid_dt,
         max_value=max_valid_dt,
         format="DD/MM/YYYY",
-        help=f"Available dates with full 9-month lookback: {min_valid_dt.strftime('%d/%m/%Y')} to {max_valid_dt.strftime('%d/%m/%Y')}"
+        help=f"Available dates with full lookback: {min_valid_dt.strftime('%d/%m/%Y')} to {max_valid_dt.strftime('%d/%m/%Y')}"
     )
     st.sidebar.caption(f"🗓️ *Available range: {min_valid_dt.strftime('%d/%m/%Y')} to {max_valid_dt.strftime('%d/%m/%Y')}*")
 else:
@@ -81,27 +111,29 @@ if selected_date:
     sliced_close = close_df.loc[:target_dt]
     sliced_volume = volume_df.loc[:target_dt]
     if sliced_close.empty or len(sliced_close) < 200:
-        st.error(f"⚠️ Need at least 252 trading days of market data before {selected_date.strftime('%d/%m/%Y')} to calculate 9-month momentum. Please choose a date between {min_valid_dt.strftime('%d/%m/%Y')} and {max_valid_dt.strftime('%d/%m/%Y')}.")
+        st.error(f"⚠️ Need at least 252 trading days of market data before {selected_date.strftime('%d/%m/%Y')}. Please choose a date between {min_valid_dt.strftime('%d/%m/%Y')} and {max_valid_dt.strftime('%d/%m/%Y')}.")
         st.stop()
 else:
     sliced_close = close_df
     sliced_volume = volume_df
 
-rank_df = ms.compute_momentum_ranks(sliced_close, sliced_volume)
+rank_df = ms.compute_momentum_ranks(sliced_close, sliced_volume, lookbacks=tuple(selected_lbs))
 
 actual_trading_dt = pd.to_datetime(sliced_close.index[-1]).date()
 cmp_date_str = actual_trading_dt.strftime("%d-%b-%Y")
 
 # Info Banner
-b1, b2 = st.columns([1, 1])
+b1, b2, b3 = st.columns([1, 1, 1])
 with b1:
     if selected_date and selected_date != actual_trading_dt:
-        st.info(f"📅 **Price As Of:** **`{cmp_date_str}`** *(Note: {selected_date.strftime('%d/%m/%Y')} was a weekend/holiday, used prior trading close)*")
+        st.info(f"📅 **Price As Of:** **`{cmp_date_str}`** *(Nearest trading close)*")
     else:
         st.info(f"📅 **Price Data As Of:** **`{cmp_date_str}`** *(NSE Closing)*")
 with b2:
     slot_budget = capital / n_hold
-    st.info(f"💰 **Budget Per Stock:** **`₹{slot_budget:,.2f}`** *(₹{capital:,.0f} ÷ {n_hold} stocks)*")
+    st.info(f"💰 **Budget Per Stock:** **`₹{slot_budget:,.2f}`** *(₹{capital:,.0f} ÷ {n_hold})*")
+with b3:
+    st.info(f"⏳ **Ranking Blend:** **`{lookback_tag}`** *(Risk-Adjusted)*")
 
 # --------------------------------------------------------------------------- #
 # Stock Sizing Algorithm (Whole Shares within Slot Budget)
@@ -159,7 +191,7 @@ with tab1:
         m3.metric("Total Invested", f"₹{total_invested:,.2f}")
         m4.metric("Unallocated Cash", f"₹{cash_left:,.2f}")
 
-        st.markdown(f"### Top {n_hold} Momentum Stocks *(As of {cmp_date_str})*")
+        st.markdown(f"### Top {n_hold} Momentum Stocks Based on **{lookback_tag}** *(As of {cmp_date_str})*")
         
         st.dataframe(
             df_portfolio.style.format({
@@ -179,9 +211,9 @@ with tab1:
 
         csv_portfolio = df_portfolio.to_csv(index=False).encode("utf-8")
         st.download_button(
-            label=f"📥 Download Top {n_hold} CSV (as of {cmp_date_str})",
+            label=f"📥 Download Top {n_hold} ({lookback_tag}) CSV",
             data=csv_portfolio,
-            file_name=f"momentum_top_{n_hold}_{cmp_date_str}.csv",
+            file_name=f"momentum_top_{n_hold}_{lookback_tag.replace(' + ', '_')}_{cmp_date_str}.csv",
             mime="text/csv",
             type="primary"
         )
@@ -192,7 +224,7 @@ with tab1:
 # TAB 2: Buffer Watchlist (Top 40 / Search any stock)
 # --------------------------------------------------------------------------- #
 with tab2:
-    st.subheader(f"Buffer Watchlist (Ranks 1 to {exit_rank} as of {cmp_date_str})")
+    st.subheader(f"Buffer Watchlist (Ranks 1 to {exit_rank} Based on {lookback_tag} as of {cmp_date_str})")
     st.markdown(f"""
     **How to use with your Google Sheet:**
     1. Check your existing stocks in your Google Sheet.
@@ -249,7 +281,7 @@ with tab2:
     st.download_button(
         label=f"📥 Download Full Buffer List (Ranks 1-{exit_rank}) CSV",
         data=csv_buffer,
-        file_name=f"momentum_buffer_ranks_1_{exit_rank}_{cmp_date_str}.csv",
+        file_name=f"momentum_buffer_ranks_1_{exit_rank}_{lookback_tag.replace(' + ', '_')}_{cmp_date_str}.csv",
         mime="text/csv"
     )
 

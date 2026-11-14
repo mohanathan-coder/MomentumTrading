@@ -119,7 +119,10 @@ def compute_momentum_ranks(close_df, volume_df, lookbacks=(63, 126, 189), vol_wi
     valid &= np.isfinite(vol) & (vol > 0.05)
 
     for lb in lookbacks:
-        valid &= np.isfinite(close_np[e - lb])
+        if e >= lb:
+            valid &= np.isfinite(close_np[e - lb])
+        else:
+            valid[:] = False
 
     # Liquidity check
     liq_window = min(126, len(close_np) - 1)
@@ -130,17 +133,26 @@ def compute_momentum_ranks(close_df, volume_df, lookbacks=(63, 126, 189), vol_wi
         cutoff = np.percentile(med_turnover[valid], 10)
         valid &= med_turnover >= cutoff
 
-    zs = []
+    # Compute all standard return windows for display
     return_dict = {}
-    for lb in lookbacks:
-        ret = close_np[e] / close_np[e - lb] - 1.0
-        return_dict[lb] = ret
-        ratio = ret / np.where(valid, vol, np.nan)
-        m = np.nanmean(ratio[valid])
-        s = np.nanstd(ratio[valid], ddof=1)
-        zs.append((ratio - m) / s)
+    for lb in (63, 126, 189):
+        if e >= lb:
+            return_dict[lb] = close_np[e] / close_np[e - lb] - 1.0
 
-    composite_score = np.nanmean(np.vstack(zs), axis=0)
+    # Build composite z-score strictly from the user's selected lookbacks
+    zs = []
+    for lb in lookbacks:
+        if lb in return_dict:
+            ret = return_dict[lb]
+            ratio = ret / np.where(valid, vol, np.nan)
+            m = np.nanmean(ratio[valid])
+            s = np.nanstd(ratio[valid], ddof=1)
+            zs.append((ratio - m) / s)
+
+    if zs:
+        composite_score = np.nanmean(np.vstack(zs), axis=0)
+    else:
+        composite_score = np.full(len(cols), np.nan)
     composite_score[~valid] = np.nan
 
     latest_prices = close_np[e]
@@ -154,9 +166,9 @@ def compute_momentum_ranks(close_df, volume_df, lookbacks=(63, 126, 189), vol_wi
             "symbol": col.replace(".NS", ""),
             "cmp": round(latest_prices[idx], 2),
             "cmp_date": latest_date_str,
-            "ret_3m_%": round(return_dict[63][idx] * 100, 1),
-            "ret_6m_%": round(return_dict[126][idx] * 100, 1),
-            "ret_9m_%": round(return_dict[189][idx] * 100, 1),
+            "ret_3m_%": round(return_dict[63][idx] * 100, 1) if 63 in return_dict else 0.0,
+            "ret_6m_%": round(return_dict[126][idx] * 100, 1) if 126 in return_dict else 0.0,
+            "ret_9m_%": round(return_dict[189][idx] * 100, 1) if 189 in return_dict else 0.0,
             "vol_ann_%": round(vol[idx] * 100, 1),
             "score": composite_score[idx]
         })
