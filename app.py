@@ -201,16 +201,123 @@ if not df_portfolio.empty:
     df_portfolio.insert(0, "S.No", range(1, len(df_portfolio) + 1))
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "🔄 Reconcile My Portfolio (Excel / CSV)",
     "🎯 Top Stocks Screener",
     "📋 Buffer Watchlist",
+    "🔄 Portfolio Reconciliation",
     "📜 Strategy Rules & Presets"
 ])
 
 # --------------------------------------------------------------------------- #
-# TAB 1: Portfolio Reconciliation Engine (Upload Excel / CSV)
+# TAB 1: Top Stocks Screener (Fresh Allocation)
 # --------------------------------------------------------------------------- #
 with tab1:
+    if not df_portfolio.empty:
+        total_invested = df_portfolio["Est. Investment (₹)"].sum()
+        cash_left = max(0.0, capital - total_invested)
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Selected Stocks", len(df_portfolio))
+        m2.metric("Total Capital", f"₹{capital:,.2f}")
+        m3.metric("Total Invested", f"₹{total_invested:,.2f}")
+        m4.metric("Unallocated Cash", f"₹{cash_left:,.2f}")
+
+        st.markdown(f"### Top {n_hold} Momentum Stocks Based on **{lookback_tag}** *(As of {cmp_date_str})*")
+        
+        st.dataframe(
+            df_portfolio.style.format({
+                "CMP (₹)": "₹{:.2f}",
+                "Est. Investment (₹)": "₹{:.2f}",
+                "3M Ret %": "{:.1f}%",
+                "6M Ret %": "{:.1f}%",
+                "9M Ret %": "{:.1f}%",
+                "Score": "{:.2f}"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        if skipped_stocks:
+            st.caption(f"💡 *Note: {len(skipped_stocks)} high-priced stocks skipped because 1 share exceeds slot budget of ₹{slot_budget:,.2f}:* " + ", ".join(skipped_stocks[:5]))
+
+        csv_portfolio = df_portfolio.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label=f"📥 Download Top {n_hold} ({lookback_tag}) CSV",
+            data=csv_portfolio,
+            file_name=f"momentum_top_{n_hold}_{lookback_tag.replace(' + ', '_')}_{cmp_date_str}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.warning("No stocks fit within the selected budget. Try increasing total capital or reducing the number of stocks.")
+
+# --------------------------------------------------------------------------- #
+# TAB 2: Buffer Watchlist (Top Buffer Ranks / Search any stock)
+# --------------------------------------------------------------------------- #
+with tab2:
+    st.subheader(f"Buffer Watchlist (Ranks 1 to {exit_rank} Based on {lookback_tag} as of {cmp_date_str})")
+    st.markdown(rf"""
+    **How to use with your Google Sheet:**
+    1. Check your existing stocks in your Google Sheet.
+    2. Search your stock symbol below.
+    3. If its rank is **$\le {exit_rank}$**, keep holding it (**HOLD**).
+    4. If it has fallen **above Rank {exit_rank}** (or is missing), exit the stock (**SELL**) and pick a replacement from **Tab 1 (Top Stocks Screener)** or **Tab 3 (Portfolio Reconciliation)**.
+    """)
+
+    buffer_df = rank_df[rank_df["rank"] <= exit_rank].copy()
+    buffer_display = []
+    for _, r in buffer_df.iterrows():
+        sym = r["symbol"]
+        buffer_display.append({
+            "Rank": int(r["rank"]),
+            "Symbol": sym,
+            "Company": name_mapping.get(sym, sym),
+            "CMP (₹)": round(r["cmp"], 2),
+            "CMP Date": r.get("cmp_date", cmp_date_str),
+            "3M Ret %": r.get("ret_3m_%", 0.0),
+            "6M Ret %": r.get("ret_6m_%", 0.0),
+            "9M Ret %": r.get("ret_9m_%", 0.0),
+            "Score": round(r.get("score", 0.0), 2),
+            "Status": f"✅ HOLD (<= {exit_rank})"
+        })
+
+    df_buffer = pd.DataFrame(buffer_display)
+    
+    search_sym = st.text_input("🔍 Quick Search Symbol in Universe (e.g. INFY, TATAMOTORS, CUPID):").strip().upper()
+    if search_sym:
+        match = rank_df[rank_df["symbol"] == search_sym]
+        if not match.empty:
+            m_rank = int(match.iloc[0]["rank"])
+            m_cmp = match.iloc[0]["cmp"]
+            if m_rank <= exit_rank:
+                st.success(f"**{search_sym}** was **Rank #{m_rank}** on {cmp_date_str} (CMP: ₹{m_cmp:,.2f}). Result: **KEEP / HOLD** (Rank <= {exit_rank})")
+            else:
+                st.error(f"**{search_sym}** was **Rank #{m_rank}** on {cmp_date_str} (CMP: ₹{m_cmp:,.2f}). Result: **EXIT / SELL** (Rank fell below {exit_rank})")
+        else:
+            st.warning(f"Symbol '{search_sym}' not found in Nifty 500.")
+
+    st.dataframe(
+        df_buffer.style.format({
+            "CMP (₹)": "₹{:.2f}",
+            "3M Ret %": "{:.1f}%",
+            "6M Ret %": "{:.1f}%",
+            "9M Ret %": "{:.1f}%",
+            "Score": "{:.2f}"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    csv_buffer = df_buffer.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label=f"📥 Download Full Buffer List (Ranks 1-{exit_rank}) CSV",
+        data=csv_buffer,
+        file_name=f"momentum_buffer_ranks_1_{exit_rank}_{lookback_tag.replace(' + ', '_')}_{cmp_date_str}.csv",
+        mime="text/csv"
+    )
+
+# --------------------------------------------------------------------------- #
+# TAB 3: Portfolio Reconciliation Engine (Upload Excel / CSV)
+# --------------------------------------------------------------------------- #
+with tab3:
     st.subheader(f"Portfolio Reconciliation as of {cmp_date_str}")
     st.markdown(rf"""
     Upload the list of stocks you bought on an earlier date (e.g., **13/09/2026**).
@@ -246,9 +353,13 @@ with tab1:
             help="Click to download a ready-to-fill sample template."
         )
 
-    # Optional manual quick-paste text area
+    # Optional manual quick-paste text area (empty by default)
     with st.expander("Or Paste Stock Symbols Directly (No file required)"):
-        manual_symbols = st.text_area("Enter symbols separated by comma or new line:", "STLTECH, WELCORP, HFCL, CUPID, LAURUSLABS")
+        manual_symbols = st.text_area(
+            "Enter symbols separated by comma or new line:",
+            value="",
+            placeholder="e.g. STLTECH, WELCORP, HFCL, CUPID, LAURUSLABS"
+        )
 
     user_holdings_df = None
     if uploaded_file is not None:
@@ -432,113 +543,8 @@ with tab1:
                 mime="text/csv",
                 type="primary"
             )
-
-# --------------------------------------------------------------------------- #
-# TAB 2: Top Stocks Screener (Fresh Allocation)
-# --------------------------------------------------------------------------- #
-with tab2:
-    if not df_portfolio.empty:
-        total_invested = df_portfolio["Est. Investment (₹)"].sum()
-        cash_left = max(0.0, capital - total_invested)
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Selected Stocks", len(df_portfolio))
-        m2.metric("Total Capital", f"₹{capital:,.2f}")
-        m3.metric("Total Invested", f"₹{total_invested:,.2f}")
-        m4.metric("Unallocated Cash", f"₹{cash_left:,.2f}")
-
-        st.markdown(f"### Top {n_hold} Momentum Stocks Based on **{lookback_tag}** *(As of {cmp_date_str})*")
-        
-        st.dataframe(
-            df_portfolio.style.format({
-                "CMP (₹)": "₹{:.2f}",
-                "Est. Investment (₹)": "₹{:.2f}",
-                "3M Ret %": "{:.1f}%",
-                "6M Ret %": "{:.1f}%",
-                "9M Ret %": "{:.1f}%",
-                "Score": "{:.2f}"
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        if skipped_stocks:
-            st.caption(f"💡 *Note: {len(skipped_stocks)} high-priced stocks skipped because 1 share exceeds slot budget of ₹{slot_budget:,.2f}:* " + ", ".join(skipped_stocks[:5]))
-
-        csv_portfolio = df_portfolio.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label=f"📥 Download Top {n_hold} ({lookback_tag}) CSV",
-            data=csv_portfolio,
-            file_name=f"momentum_top_{n_hold}_{lookback_tag.replace(' + ', '_')}_{cmp_date_str}.csv",
-            mime="text/csv"
-        )
     else:
-        st.warning("No stocks fit within the selected budget. Try increasing total capital or reducing the number of stocks.")
-
-# --------------------------------------------------------------------------- #
-# TAB 3: Buffer Watchlist (Top Buffer Ranks / Search any stock)
-# --------------------------------------------------------------------------- #
-with tab3:
-    st.subheader(f"Buffer Watchlist (Ranks 1 to {exit_rank} Based on {lookback_tag} as of {cmp_date_str})")
-    st.markdown(rf"""
-    **How to use with your Google Sheet:**
-    1. Check your existing stocks in your Google Sheet.
-    2. Search your stock symbol below.
-    3. If its rank is **$\le {exit_rank}$**, keep holding it (**HOLD**).
-    4. If it has fallen **above Rank {exit_rank}** (or is missing), exit the stock (**SELL**) and pick a replacement from Tab 1.
-    """)
-
-    buffer_df = rank_df[rank_df["rank"] <= exit_rank].copy()
-    buffer_display = []
-    for _, r in buffer_df.iterrows():
-        sym = r["symbol"]
-        buffer_display.append({
-            "Rank": int(r["rank"]),
-            "Symbol": sym,
-            "Company": name_mapping.get(sym, sym),
-            "CMP (₹)": round(r["cmp"], 2),
-            "CMP Date": r.get("cmp_date", cmp_date_str),
-            "3M Ret %": r.get("ret_3m_%", 0.0),
-            "6M Ret %": r.get("ret_6m_%", 0.0),
-            "9M Ret %": r.get("ret_9m_%", 0.0),
-            "Score": round(r.get("score", 0.0), 2),
-            "Status": f"✅ HOLD (<= {exit_rank})"
-        })
-
-    df_buffer = pd.DataFrame(buffer_display)
-    
-    search_sym = st.text_input("🔍 Quick Search Symbol in Universe (e.g. INFY, TATAMOTORS, CUPID):").strip().upper()
-    if search_sym:
-        match = rank_df[rank_df["symbol"] == search_sym]
-        if not match.empty:
-            m_rank = int(match.iloc[0]["rank"])
-            m_cmp = match.iloc[0]["cmp"]
-            if m_rank <= exit_rank:
-                st.success(f"**{search_sym}** was **Rank #{m_rank}** on {cmp_date_str} (CMP: ₹{m_cmp:,.2f}). Result: **KEEP / HOLD** (Rank <= {exit_rank})")
-            else:
-                st.error(f"**{search_sym}** was **Rank #{m_rank}** on {cmp_date_str} (CMP: ₹{m_cmp:,.2f}). Result: **EXIT / SELL** (Rank fell below {exit_rank})")
-        else:
-            st.warning(f"Symbol '{search_sym}' not found in Nifty 500.")
-
-    st.dataframe(
-        df_buffer.style.format({
-            "CMP (₹)": "₹{:.2f}",
-            "3M Ret %": "{:.1f}%",
-            "6M Ret %": "{:.1f}%",
-            "9M Ret %": "{:.1f}%",
-            "Score": "{:.2f}"
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    csv_buffer = df_buffer.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label=f"📥 Download Full Buffer List (Ranks 1-{exit_rank}) CSV",
-        data=csv_buffer,
-        file_name=f"momentum_buffer_ranks_1_{exit_rank}_{lookback_tag.replace(' + ', '_')}_{cmp_date_str}.csv",
-        mime="text/csv"
-    )
+        st.info("ℹ️ **No portfolio data entered.**\n\nPlease upload an Excel (`.xlsx`) or CSV (`.csv`) file above, or paste your stock symbols in the text box above to view your reconciled action plan.")
 
 # --------------------------------------------------------------------------- #
 # TAB 4: Strategy Rules & Presets
@@ -584,13 +590,13 @@ with tab4:
     * **Zero Daily Trading:** Never buy or sell in between monthly dates. Momentum needs time to develop.
 
     #### 2. The Exit Buffer Rule (When to SELL vs HOLD)
-    * Look up each of your held stocks in **Tab 1 or Tab 3**.
+    * Look up each of your held stocks in **Tab 2 (Buffer Watchlist)** or **Tab 3 (Portfolio Reconciliation)**.
     * **If its rank $\le$ Exit Buffer:** **`HOLD`**. Do not sell, even if it had a minor red week.
     * **If its rank falls $>$ Exit Buffer:** **`SELL`**. Exit the entire position at market open.
 
     #### 3. Filling Vacant Slots (When to BUY)
     * Count your vacant slots: `Open Slots = Target Holdings - Retained Holdings`.
-    * Look at **Tab 1 (Reconciled Action Plan)**.
+    * Look at **Tab 1 (Top Stocks Screener)** or **Tab 3 (Portfolio Reconciliation)**.
     * The engine automatically calculates the exact shares to buy for replacement stocks.
 
     #### 4. Whole-Share Sizing
