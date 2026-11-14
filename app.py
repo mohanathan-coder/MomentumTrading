@@ -225,7 +225,7 @@ with tab1:
 # --------------------------------------------------------------------------- #
 with tab2:
     st.subheader(f"Buffer Watchlist (Ranks 1 to {exit_rank} Based on {lookback_tag} as of {cmp_date_str})")
-    st.markdown(f"""
+    st.markdown(rf"""
     **How to use with your Google Sheet:**
     1. Check your existing stocks in your Google Sheet.
     2. Search your stock symbol below.
