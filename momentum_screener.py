@@ -298,8 +298,8 @@ def generate_rebalance_orders(rank_df, name_mapping, capital=50000, n_hold=10, e
 def main():
     parser = argparse.ArgumentParser(description="Nifty 500 Monthly Momentum Screener")
     parser.add_argument("--universe", default=DEFAULT_UNIVERSE, help="Path to Nifty 500 CSV")
-    parser.add_argument("--capital", type=float, default=100000, help="Total portfolio capital (Rs)")
-    parser.add_argument("--n-hold", type=int, default=20, help="Number of stocks to hold (default 20)")
+    parser.add_argument("--capital", type=float, default=50000, help="Total portfolio capital (Rs)")
+    parser.add_argument("--n-hold", type=int, default=10, help="Number of stocks to hold (default 10)")
     parser.add_argument("--exit-rank", type=int, default=40, help="Exit buffer rank threshold (default 40)")
     parser.add_argument("--init", action="store_true", help="Initialize portfolio with fresh top 20")
     parser.add_argument("--commit", action="store_true", help="Save the resulting portfolio to current_portfolio.csv")
