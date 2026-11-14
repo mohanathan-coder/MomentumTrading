@@ -141,18 +141,22 @@ def compute_momentum_ranks(close_df, volume_df, lookbacks=(63, 126, 189), vol_wi
 
     # Build composite z-score strictly from the user's selected lookbacks
     zs = []
-    for lb in lookbacks:
-        if lb in return_dict:
-            ret = return_dict[lb]
-            ratio = ret / np.where(valid, vol, np.nan)
-            m = np.nanmean(ratio[valid])
-            s = np.nanstd(ratio[valid], ddof=1)
-            zs.append((ratio - m) / s)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        for lb in lookbacks:
+            if lb in return_dict:
+                ret = return_dict[lb]
+                ratio = ret / np.where(valid, vol, np.nan)
+                m = np.nanmean(ratio[valid])
+                s = np.nanstd(ratio[valid], ddof=1)
+                zs.append((ratio - m) / s)
 
-    if zs:
-        composite_score = np.nanmean(np.vstack(zs), axis=0)
-    else:
-        composite_score = np.full(len(cols), np.nan)
+        if zs:
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                composite_score = np.nanmean(np.vstack(zs), axis=0)
+        else:
+            composite_score = np.full(len(cols), np.nan)
     composite_score[~valid] = np.nan
 
     latest_prices = close_np[e]
