@@ -190,7 +190,7 @@ def save_current_portfolio(df):
     print(f"[✓] Saved updated portfolio to {PORTFOLIO_FILE}")
 
 
-def generate_rebalance_orders(rank_df, name_mapping, capital=100000, n_hold=20, exit_rank=40):
+def generate_rebalance_orders(rank_df, name_mapping, capital=50000, n_hold=10, exit_rank=40):
     """
     Evaluates current holdings against new ranks and allocates capital.
     """
